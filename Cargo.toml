@@ -1,0 +1,13 @@
+[package]
+name = "grecho"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+hyper = { version = "1.6.0", features = ["full"] }
+hyper-util = { version = "0.1.10", features = ["tokio"] }
+tokio = { version = "1.43.0", features = ["full"] }
+http-body-util = "0.1"
+bytes = "1.0"
+clap = { version = "4.5.27", features = ["derive"] }
+
