@@ -93,7 +93,8 @@ async fn handle_request(req: Request<Incoming>) -> Result<Response<Full<Bytes>>,
     // Extract request components
     let uri = req.uri().to_string();
     let headers = req.headers().clone();
-    let body_bytes = req.collect().await.unwrap().to_bytes();
+    let body_bytes = req.into_body().collect().await.unwrap().to_bytes();
+    //let body_bytes = req.collect().await.unwrap().to_bytes();
 
     // Initialize response builder
     let mut response_builder = Response::builder();
