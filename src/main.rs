@@ -43,9 +43,29 @@ const RESERVED_HEADERS: &[&str] = &[
 const INTERNAL_STATUS_CODE_HEADER: &str = "internal.status-code";
 const INTERNAL_RESPONSE_BODY_HEADER: &str = "internal.response-body";
 
-async fn echo_handler(req: HttpRequest, body: web::Bytes) -> ActixResult<HttpResponse> {
+async fn echo_handler(req: HttpRequest, body: web::Bytes, verbose: web::Data<bool>) -> ActixResult<HttpResponse> {
     let headers = req.headers();
     let reserved_headers: HashSet<&str> = RESERVED_HEADERS.iter().cloned().collect();
+
+    // Log incoming request if verbose mode is enabled
+    if **verbose {
+        println!("\n📥 INCOMING REQUEST:");
+        println!("   {} {}{}", req.method(), req.path(), req.query_string());
+        if !headers.is_empty() {
+            println!("   Headers:");
+            for (name, value) in headers.iter() {
+                if let Ok(value_str) = value.to_str() {
+                    println!("     {}: {}", name, value_str);
+                }
+            }
+        } else {
+            println!("   No headers");
+        }
+
+        if !body.is_empty() {
+            println!("   Body: {}", String::from_utf8_lossy(&body));
+        }
+    }
 
     // Check for internal status code override
     let status_code = headers
@@ -80,6 +100,25 @@ async fn echo_handler(req: HttpRequest, body: web::Bytes) -> ActixResult<HttpRes
                 response.insert_header((name.clone(), header_value));
             }
         }
+    }
+
+    // Log outgoing response if verbose mode is enabled
+    if **verbose {
+        println!("\n📤 OUTGOING RESPONSE:");
+        println!("   Status: {}", status_code);
+        println!("   Headers:");
+        for (name, value) in headers.iter() {
+            let header_name = name.as_str().to_lowercase();
+            if !reserved_headers.contains(header_name.as_str())
+                && header_name != INTERNAL_STATUS_CODE_HEADER.to_lowercase()
+                && header_name != INTERNAL_RESPONSE_BODY_HEADER.to_lowercase() {
+                if let Ok(header_value) = value.to_str() {
+                    println!("     {}: {}", name, header_value);
+                }
+            }
+        }
+        println!("   Body: {}", response_body);
+        println!();
     }
 
     Ok(response.body(response_body))
@@ -126,6 +165,13 @@ async fn main() -> std::io::Result<()> {
                 .help("The port number to bind to")
                 .default_value("3000")
         )
+        .arg(
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .help("Enable verbose logging of requests and responses")
+                .action(clap::ArgAction::SetTrue)
+        )
         .get_matches();
 
     // Extract and validate hostname
@@ -148,16 +194,23 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
+    // Extract verbose flag
+    let verbose = matches.get_flag("verbose");
+
     let bind_address = SocketAddr::new(hostname, port);
 
     println!("🚀 Starting Echo Server on http://{}", bind_address);
     println!("📋 Headers that are relevant for the request only, like 'host' or 'user-agent' won't be echoed.");
     println!("⚙️  Use '{}' header to override response status code", INTERNAL_STATUS_CODE_HEADER);
     println!("📝 Use '{}' header to override response body", INTERNAL_RESPONSE_BODY_HEADER);
+    if verbose {
+        println!("🔍 Verbose mode enabled - requests and responses will be logged");
+    }
 
     // Create and run the HTTP server
-    HttpServer::new(|| {
+    HttpServer::new(move || {
         App::new()
+            .app_data(web::Data::new(verbose))
             .wrap(Logger::default())
             .route("/{path:.*}", web::to(echo_handler))
             .default_service(web::to(echo_handler))
