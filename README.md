@@ -34,28 +34,8 @@ An echo server is a network service that sends back the data it receives from cl
 
 1. **Clone or create the project**:
    ```bash
-   mkdir rust-echo-server
-   cd rust-echo-server
-   ```
-
-2. **Create `Cargo.toml`**:
-   ```toml
-    [package]
-    name = "grecho"
-    version = "1.0.1"
-    edition = "2021"
-
-    [dependencies]
-    actix-web = "4.11.0"
-    clap = { version = "4.5.40", features = ["derive"] }
-    env_logger = "0.11.8"
-    num_cpus = "1.17.0"
-   ```
-
-3. **Add the server code**: Copy the provided Rust code into `src/main.rs`
-
-4. **Build the project**:
-   ```bash
+   git clone https://github.com/sgchris/grecho.git
+   cd grecho
    cargo build --release
    ```
 
@@ -86,6 +66,7 @@ cargo run -- -h 192.168.1.100 -p 9000
 |--------|-------|-------------|---------|
 | `--hostname` | `-h` | IP address to bind to | `127.0.0.1` |
 | `--port` | `-p` | Port number to bind to | `3000` |
+| `--verbose` | `-v` | Display requests and responses details | false |
 
 ## 📖 Examples
 
@@ -145,7 +126,6 @@ Original request body
 **Response**:
 ```http
 HTTP/1.1 200 OK
-Authorization: Bearer token123
 
 Custom response message
 ```
@@ -158,21 +138,6 @@ The server recognizes special internal headers for response control:
   - Example: `internal.status-code: 503` → Returns HTTP 503
 - **`internal.response-body`**: Override the response body content
   - Example: `internal.response-body: Error occurred` → Returns "Error occurred"
-
-## 🚫 Reserved Headers
-
-The following headers are **not** echoed back in responses (they're filtered out):
-
-- `content-length`
-- `user-agent`
-- `host`
-- `connection`
-- `accept*` headers
-- `cache-control`
-- `sec-*` headers
-- `authorization`
-- `cookie`
-- And many more standard HTTP client headers
 
 ## 🧪 Testing with curl
 
