@@ -1,158 +1,195 @@
-use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper::{Request, Response};
-use hyper_util::rt::TokioIo;
-use std::convert::Infallible;
-use std::net::SocketAddr;
-use tokio::net::TcpListener;
-use clap::Parser; // For command-line argument parsing
+use actix_web::{
+    web, App, HttpRequest, HttpResponse, HttpServer, Result as ActixResult,
+    middleware::Logger,
+};
+use clap::{Arg, Command};
+use std::collections::HashSet;
+use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
 
-// List of headers that should not be echoed in the response
-const EXCLUDED_HEADERS: &[&str] = &[
-    "accept",
-    "user-agent",
-
-    // Content-related
+// Reserved headers that should not be copied to the response
+const RESERVED_HEADERS: &[&str] = &[
     "content-length",
-    "content-type",
-    "content-encoding",
-    "content-disposition",
-    "content-range",
-    "content-language",
-    // Transfer-related
+    "user-agent",
+    "host",
+    "connection",
+    "accept",
+    "accept-encoding",
+    "accept-language",
+    "cache-control",
+    "upgrade-insecure-requests",
+    "sec-fetch-dest",
+    "sec-fetch-mode",
+    "sec-fetch-site",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "authorization",
+    "cookie",
+    "referer",
+    "origin",
+    "x-forwarded-for",
+    "x-forwarded-proto",
+    "x-real-ip",
     "transfer-encoding",
     "te",
-    // Connection-related
-    "connection",
-    "keep-alive",
-    "upgrade",
-    "proxy-connection",
-    // Authentication/Authorization
-    "authorization",
-    "proxy-authenticate",
+    "trailer",
     "proxy-authorization",
-    // Request-specific
-    "host",
-    "expect",
-    "max-forwards",
-    "if-match",
-    "if-none-match",
-    "if-modified-since",
-    "if-unmodified-since",
-    "if-range",
+    "proxy-authenticate",
+    "www-authenticate",
 ];
 
-#[derive(Parser, Debug)]
-#[clap(about, version, author)]
-struct Args {
-    /// Host to bind the server to
-    #[clap(short = 'H', long, default_value = "127.0.0.1")]
-    host: String,
+// Internal headers for controlling response
+const INTERNAL_STATUS_CODE_HEADER: &str = "internal.status-code";
+const INTERNAL_RESPONSE_BODY_HEADER: &str = "internal.response-body";
 
-    /// Port to bind the server to
-    #[clap(short, long, default_value = "3000")]
-    port: u16,
-}
+async fn echo_handler(req: HttpRequest, body: web::Bytes) -> ActixResult<HttpResponse> {
+    let headers = req.headers();
+    let reserved_headers: HashSet<&str> = RESERVED_HEADERS.iter().cloned().collect();
 
-
-#[tokio::main]
-async fn main() {
-    // Parse command-line arguments
-    let args = Args::parse();
-
-    // Construct the server address
-    let addr = SocketAddr::new(args.host.parse().expect("Invalid host"), args.port);
-
-    println!("Starting server on {}:{}", args.host, args.port);
-
-    // Create TCP listener
-    let listener = TcpListener::bind(addr).await.unwrap();
-
-    loop {
-        let (tcp_stream, _) = listener.accept().await.unwrap();
-        let io = TokioIo::new(tcp_stream);
-
-        // Spawn a task to serve the connection
-        tokio::task::spawn(async move {
-            if let Err(err) = http1::Builder::new()
-                .serve_connection(io, service_fn(handle_request))
-                .await
-            {
-                eprintln!("Error serving connection: {}", err);
-            }
-        });
-    }
-}
-
-async fn handle_request(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
-    println!();
-    println!("New request");
-    // Extract request components
-    let uri = req.uri().to_string();
-    let headers = req.headers().clone();
-    let body_bytes = req.into_body().collect().await.unwrap().to_bytes();
-    //let body_bytes = req.collect().await.unwrap().to_bytes();
-
-    // Initialize response builder
-    let mut response_builder = Response::builder();
-
-    // Get status code from internal headers or default to 200
+    // Check for internal status code override
     let status_code = headers
-        .get("internal.status-code")
+        .get(INTERNAL_STATUS_CODE_HEADER)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u16>().ok())
-        .map(hyper::StatusCode::from_u16)
-        .unwrap_or(Ok(hyper::StatusCode::OK))
-        .unwrap_or(hyper::StatusCode::OK);
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(200);
 
-    // Set status code
-    println!("Response status code: {}", status_code);
-    response_builder = response_builder.status(status_code);
+    // Check for internal response body override
+    let response_body = headers
+        .get(INTERNAL_RESPONSE_BODY_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| String::from_utf8_lossy(&body).to_string());
 
-    // Set request-uri header
-    println!("Response uri: {}", uri);
-    response_builder = response_builder.header("request-uri", uri);
+    // Create response with the determined status code
+    let mut response = HttpResponse::build(
+        actix_web::http::StatusCode::from_u16(status_code)
+            .unwrap_or(actix_web::http::StatusCode::OK)
+    );
 
-    // Copy non-internal and non-excluded headers
-    let mut headers_string = String::new();
-    for (key, value) in headers.iter() {
-        let key_str = key.as_str().to_lowercase();
-        if !key_str.starts_with("internal.") && !EXCLUDED_HEADERS.contains(&key_str.as_str()) {
-            headers_string.push_str(&format!("\t{}: {};\r\n", key, value.to_str().unwrap()));
-            response_builder = response_builder.header(key, value);
+    // Copy non-reserved headers to response, excluding internal headers
+    for (name, value) in headers.iter() {
+        let header_name = name.as_str().to_lowercase();
+
+        // Skip reserved headers and internal control headers
+        if !reserved_headers.contains(header_name.as_str())
+            && header_name != INTERNAL_STATUS_CODE_HEADER.to_lowercase()
+            && header_name != INTERNAL_RESPONSE_BODY_HEADER.to_lowercase() {
+
+            if let Ok(header_value) = value.to_str() {
+                response.insert_header((name.clone(), header_value));
+            }
         }
     }
 
-    // Build the string with headers
-    /*
-    let response_headers_for_output = response_builder.headers().unwrap();
-    let mut headers_string = String::new();
-    for (key, value) in response_headers_for_output {
-        headers_string.push_str(&format!("{}: {}; ", key, value.to_str().unwrap()));
-    }
-    */
-    println!("Response headers: \n{}", headers_string);
-
-    // Get response body from internal headers or use request body
-    let response_body = if let Some(internal_body) = headers.get("internal.response-body") {
-        // Try to convert the header value to a string
-        if let Ok(body_str) = internal_body.to_str() {
-            // Use the internal response body
-            Bytes::from(body_str.as_bytes().to_vec())
-        } else {
-            // If we can't convert the header value to string, fallback to request body
-            body_bytes
-        }
-    } else {
-        // If there's no internal response body header, use the request body
-        body_bytes
-    };
-    println!("Response body: {:?}", response_body.clone());
-
-    // Build and return response
-    Ok(response_builder.body(Full::new(response_body)).unwrap())
+    Ok(response.body(response_body))
 }
 
+fn validate_hostname(hostname: &str) -> Result<IpAddr, String> {
+    IpAddr::from_str(hostname)
+        .map_err(|_| format!("Invalid hostname '{}'. Must be a valid IP address.", hostname))
+}
+
+fn validate_port(port_str: &str) -> Result<u16, String> {
+    let port: u16 = port_str.parse()
+        .map_err(|_| format!("Invalid port '{}'. Must be a number between 1 and 65535.", port_str))?;
+
+    if port == 0 {
+        return Err("Port cannot be 0. Must be between 1 and 65535.".to_string());
+    }
+
+    Ok(port)
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    // Initialize logger
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
+    // Parse command line arguments
+    let matches = Command::new("Echo Server")
+        .version("1.0")
+        .about("A high-performance echo server that mirrors requests back as responses")
+        .arg(
+            Arg::new("hostname")
+                .short('h')
+                .long("hostname")
+                .value_name("HOSTNAME")
+                .help("The hostname/IP address to bind to")
+                .default_value("127.0.0.1")
+        )
+        .arg(
+            Arg::new("port")
+                .short('p')
+                .long("port")
+                .value_name("PORT")
+                .help("The port number to bind to")
+                .default_value("3000")
+        )
+        .get_matches();
+
+    // Extract and validate hostname
+    let hostname_str = matches.get_one::<String>("hostname").unwrap();
+    let hostname = match validate_hostname(hostname_str) {
+        Ok(ip) => ip,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Extract and validate port
+    let port_str = matches.get_one::<String>("port").unwrap();
+    let port = match validate_port(port_str) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let bind_address = SocketAddr::new(hostname, port);
+
+    println!("🚀 Starting Echo Server on http://{}", bind_address);
+    println!("📋 Reserved headers that won't be echoed: {:?}", RESERVED_HEADERS);
+    println!("⚙️  Use '{}' header to override response status code", INTERNAL_STATUS_CODE_HEADER);
+    println!("📝 Use '{}' header to override response body", INTERNAL_RESPONSE_BODY_HEADER);
+
+    // Create and run the HTTP server
+    HttpServer::new(|| {
+        App::new()
+            .wrap(Logger::default())
+            .route("/{path:.*}", web::to(echo_handler))
+            .default_service(web::to(echo_handler))
+    })
+        .bind(&bind_address)?
+        .workers(num_cpus::get())
+        .run()
+        .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_hostname() {
+        assert!(validate_hostname("127.0.0.1").is_ok());
+        assert!(validate_hostname("0.0.0.0").is_ok());
+        assert!(validate_hostname("192.168.1.1").is_ok());
+        assert!(validate_hostname("::1").is_ok());
+        assert!(validate_hostname("invalid-hostname").is_err());
+        assert!(validate_hostname("999.999.999.999").is_err());
+    }
+
+    #[test]
+    fn test_validate_port() {
+        assert_eq!(validate_port("3000").unwrap(), 3000);
+        assert_eq!(validate_port("8080").unwrap(), 8080);
+        assert_eq!(validate_port("65535").unwrap(), 65535);
+        assert!(validate_port("0").is_err());
+        assert!(validate_port("65536").is_err());
+        assert!(validate_port("invalid").is_err());
+        assert!(validate_port("-1").is_err());
+    }
+}
