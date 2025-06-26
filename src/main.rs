@@ -112,7 +112,7 @@ async fn main() -> std::io::Result<()> {
         .about("A high-performance echo server that mirrors requests back as responses")
         .arg(
             Arg::new("hostname")
-                .short('h')
+                .short('n')
                 .long("hostname")
                 .value_name("HOSTNAME")
                 .help("The hostname/IP address to bind to")
@@ -151,7 +151,7 @@ async fn main() -> std::io::Result<()> {
     let bind_address = SocketAddr::new(hostname, port);
 
     println!("🚀 Starting Echo Server on http://{}", bind_address);
-    println!("📋 Reserved headers that won't be echoed: {:?}", RESERVED_HEADERS);
+    println!("📋 Headers that are relevant for the request only, like 'host' or 'user-agent' won't be echoed.");
     println!("⚙️  Use '{}' header to override response status code", INTERNAL_STATUS_CODE_HEADER);
     println!("📝 Use '{}' header to override response body", INTERNAL_RESPONSE_BODY_HEADER);
 
