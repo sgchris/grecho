@@ -147,7 +147,7 @@ async fn main() -> std::io::Result<()> {
 
     // Parse command line arguments
     let matches = Command::new("Echo Server")
-        .version("1.0")
+        .version("1.0.1")
         .about("A high-performance echo server that mirrors requests back as responses")
         .arg(
             Arg::new("hostname")
