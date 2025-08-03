@@ -43,7 +43,7 @@ An echo server is a network service that sends back the data it receives from cl
 
 ### Basic Usage
 
-Start the server with default settings (127.0.0.1:3000):
+Start the server with default settings (127.0.0.1:8001):
 ```bash
 cargo run
 ```
@@ -65,7 +65,7 @@ cargo run -- -h 192.168.1.100 -p 9000
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
 | `--hostname` | `-h` | IP address to bind to | `127.0.0.1` |
-| `--port` | `-p` | Port number to bind to | `3000` |
+| `--port` | `-p` | Port number to bind to | `8001` |
 | `--verbose` | `-v` | Display requests and responses details | false |
 
 ## 📖 Examples
@@ -75,7 +75,7 @@ cargo run -- -h 192.168.1.100 -p 9000
 **Request**:
 ```http
 POST /api/users HTTP/1.1
-Host: 127.0.0.1:3000
+Host: 127.0.0.1:8001
 Content-Type: application/json
 X-Custom-Header: my-value
 
@@ -96,7 +96,7 @@ X-Custom-Header: my-value
 **Request**:
 ```http
 GET /test HTTP/1.1
-Host: 127.0.0.1:3000
+Host: 127.0.0.1:8001
 internal.status-code: 404
 X-Test-Header: test-value
 
@@ -116,7 +116,7 @@ Request body content
 **Request**:
 ```http
 PUT /data HTTP/1.1
-Host: 127.0.0.1:3000
+Host: 127.0.0.1:8001
 internal.response-body: Custom response message
 Authorization: Bearer token123
 
@@ -143,7 +143,7 @@ The server recognizes special internal headers for response control:
 
 **Basic test**:
 ```bash
-curl -X POST http://127.0.0.1:3000/test \
+curl -X POST http://127.0.0.1:8001/test \
   -H "Content-Type: application/json" \
   -H "X-Custom: value" \
   -d '{"test": true}'
@@ -151,14 +151,14 @@ curl -X POST http://127.0.0.1:3000/test \
 
 **Test custom status code**:
 ```bash
-curl -X GET http://127.0.0.1:3000/error \
+curl -X GET http://127.0.0.1:8001/error \
   -H "internal.status-code: 500" \
   -d "Error simulation"
 ```
 
 **Test custom response body**:
 ```bash
-curl -X POST http://127.0.0.1:3000/custom \
+curl -X POST http://127.0.0.1:8001/custom \
   -H "internal.response-body: Hello World!" \
   -d "Original body"
 ```

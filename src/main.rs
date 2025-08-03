@@ -165,7 +165,7 @@ async fn main() -> std::io::Result<()> {
         eprintln!("Warning: Could not load Settings.toml ({}). Using default values.", e);
         Settings {
             host: "127.0.0.1".to_string(),
-            port: 3001,
+            port: 8001,
         }
     });
 
@@ -187,7 +187,7 @@ async fn main() -> std::io::Result<()> {
                 .long("port")
                 .value_name("PORT")
                 .help("The port number to bind to")
-                .default_value("3001")
+                .default_value("8001")
         )
         .arg(
             Arg::new("verbose")
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_validate_port() {
-        assert_eq!(validate_port("3000").unwrap(), 3000);
+        assert_eq!(validate_port("8001").unwrap(), 8001);
         assert_eq!(validate_port("8080").unwrap(), 8080);
         assert_eq!(validate_port("65535").unwrap(), 65535);
         assert!(validate_port("0").is_err());
