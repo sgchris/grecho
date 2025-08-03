@@ -3,6 +3,7 @@ use actix_web::{
     middleware::Logger,
 };
 use clap::{Arg, Command};
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
@@ -42,6 +43,20 @@ const RESERVED_HEADERS: &[&str] = &[
 // Internal headers for controlling response
 const INTERNAL_STATUS_CODE_HEADER: &str = "internal.status-code";
 const INTERNAL_RESPONSE_BODY_HEADER: &str = "internal.response-body";
+
+#[derive(Debug, Deserialize)]
+struct Settings {
+    host: String,
+    port: u16,
+}
+
+impl Settings {
+    fn load() -> Result<Self, Box<dyn std::error::Error>> {
+        let settings_content = std::fs::read_to_string("Settings.toml")?;
+        let settings: Settings = toml::from_str(&settings_content)?;
+        Ok(settings)
+    }
+}
 
 async fn echo_handler(req: HttpRequest, body: web::Bytes, verbose: web::Data<bool>) -> ActixResult<HttpResponse> {
     let headers = req.headers();
@@ -145,7 +160,16 @@ async fn main() -> std::io::Result<()> {
     // Initialize logger
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    // Parse command line arguments
+    // Load settings from Settings.toml, with fallback defaults
+    let settings = Settings::load().unwrap_or_else(|e| {
+        eprintln!("Warning: Could not load Settings.toml ({}). Using default values.", e);
+        Settings {
+            host: "127.0.0.1".to_string(),
+            port: 3001,
+        }
+    });
+
+    // Parse command line arguments using static defaults, will override with settings if not provided by user
     let matches = Command::new("Echo Server")
         .version("1.0.1")
         .about("A high-performance echo server that mirrors requests back as responses")
@@ -163,7 +187,7 @@ async fn main() -> std::io::Result<()> {
                 .long("port")
                 .value_name("PORT")
                 .help("The port number to bind to")
-                .default_value("3000")
+                .default_value("3001")
         )
         .arg(
             Arg::new("verbose")
@@ -174,8 +198,10 @@ async fn main() -> std::io::Result<()> {
         )
         .get_matches();
 
-    // Extract and validate hostname
-    let hostname_str = matches.get_one::<String>("hostname").unwrap();
+    // Extract hostname - use CLI arg if provided, otherwise use settings
+    let hostname_str = matches.get_one::<String>("hostname")
+        .map(|s| s.as_str())
+        .unwrap_or(&settings.host);
     let hostname = match validate_hostname(hostname_str) {
         Ok(ip) => ip,
         Err(e) => {
@@ -184,14 +210,17 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-    // Extract and validate port
-    let port_str = matches.get_one::<String>("port").unwrap();
-    let port = match validate_port(port_str) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
+    // Extract port - use CLI arg if provided, otherwise use settings
+    let port = if let Some(port_str) = matches.get_one::<String>("port") {
+        match validate_port(port_str) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
         }
+    } else {
+        settings.port
     };
 
     // Extract verbose flag
@@ -200,6 +229,7 @@ async fn main() -> std::io::Result<()> {
     let bind_address = SocketAddr::new(hostname, port);
 
     println!("🚀 Starting Echo Server on http://{}", bind_address);
+    println!("⚙️  Configuration loaded from Settings.toml (host: {}, port: {})", settings.host, settings.port);
     println!("📋 Headers that are relevant for the request only, like 'host' or 'user-agent' won't be echoed.");
     println!("⚙️  Use '{}' header to override response status code", INTERNAL_STATUS_CODE_HEADER);
     println!("📝 Use '{}' header to override response body", INTERNAL_RESPONSE_BODY_HEADER);
